@@ -8,109 +8,121 @@ class Point:
         self.y = y
 
 
-class Constant(tkinter.Frame):
-    def __init__(self, name, default=0):
-        super().__init__()
-        self.label = tkinter.Label(text=name)
-        self.entry = tkinter.Entry()
-        self.entry.insert(tkinter.END, str(default))
-        self.value = 0
-        self.name = name
-        self.draw()
+class Rectangle:
+    def __init__(self, canvas, x, y, height, width, fill):
+        self.canvas = canvas
+        self.height = height
+        self.width = width
+        self.x = x
+        self.y = y
+        self.rect = canvas.create_rectangle(x, y, x + width, y - height, fill=fill)
 
-    def draw(self):
-        self.label.pack()
-        self.entry.pack()
+    def __update(self):
+        self.canvas.coords(self.rect, self.x, self.y, self.x + self.width, self.y - self.height)
 
-    def read(self):
-        self.value = float(self.entry.get())
+    def mouse(self, event):
+        self.move(event.x, self.y)
+
+    def move(self, x, y):
+        self.x = x
+        self.y = y
+        self.__update()
 
 
-class Constants(tkinter.Frame):
-    def __init__(self):
-        super().__init__()
-        self.a = Constant("a", 1)
-        self.c = [Constant(f'C{i}', 20) for i in range(1, 5)]
-        self.c.insert(0, None)
-
-    def read(self):
-        self.a.read()
-        for i in self.c:
-            if i is not None:
-                i.read()
+class SystemState:
+    def __init__(self, x, y):
+        self.c1 = 0
+        self.c2 = 0
+        self.c3 = 0
+        self.c4 = 0
+        self.update(x, y)
 
     def get(self, t):
-        c = [0] + [self.c[i].value for i in range(1, 5)]
-        a = self.a.value
-        x1 = c[1] * math.cos(a * t) + c[2] * math.sin(a * t) + c[3] * math.cos(a * t / math.sqrt(6)) + c[4] * math.sin(
-            a * t / math.sqrt(6))
-        x2 = -c[1] * math.cos(a * t) - c[2] * math.sin(a * t) + 3 / 2 * c[3] * math.cos(a * t / math.sqrt(6)) + 3 / 2 * \
-             c[4] * math.sin(a * t / math.sqrt(6))
+        c = [0, self.c1, self.c2, self.c3, self.c4]
+        x1 = c[1] * math.cos(t) + c[2] * math.sin(t) + c[3] * math.cos(t / math.sqrt(6)) + c[4] * math.sin(
+            t / math.sqrt(6))
+        x2 = -c[1] * math.cos(t) - c[2] * math.sin(t) + 3 / 2 * c[3] * math.cos(t / math.sqrt(6)) + 3 / 2 * c[4] \
+             * math.sin(t / math.sqrt(6))
         return x1, x2
+
+    def update(self, x1, x2):
+        self.c1 = (3 * x1 - 2 * x2) / 5
+        self.c3 = 2 * (x1 + x2) / 5
 
 
 class Cartesian(tkinter.Frame):
 
     def __init__(self, zx, zy):
         super().__init__()
-        self.constants = Constants()
-        self.start = tkinter.Button(text="start", command=self.action)
         self.ZERO = Point(zx, zy)
         self.canvas = tkinter.Canvas(self)
         self.line_size = 600
         self.draw()
+        self.LEFT_ZERO = self.ZERO.x + 150
+        self.RIGHT_ZERO = self.ZERO.x + 300
+        self.left_rect = Rectangle(self.canvas, self.LEFT_ZERO, self.ZERO.y, 30, 50, "yellow")
+        self.right_rect = Rectangle(self.canvas, self.RIGHT_ZERO, self.ZERO.y, 30, 50, "purple")
+        self.state = SystemState(0, 0)
+        self.canvas.bind('<B1-Motion>', self.mouse)
+        self.canvas.bind('<ButtonRelease-1>', self.state_update)
+        self.continue_action = True
+        self.count = 10
+        self.lsticks = [(self.canvas.create_line(0, 0, 0, 0),
+                         self.canvas.create_line(0, 0, 0, 0)) for i in range(self.count)]
+        self.rsticks = [(self.canvas.create_line(0, 0, 0, 0),
+                         self.canvas.create_line(0, 0, 0, 0)) for i in range(self.count)]
+        self.stick_update()
+        self.time = 0
+
+    def mouse(self, event):
+        self.continue_action = False
+        self.right_rect.mouse(event)
+        self.left_rect.move(self.ZERO.x + (self.right_rect.x - self.ZERO.x) // 2 - self.left_rect.width // 2,
+                            self.left_rect.y)
+        self.stick_update()
+
+    def state_update(self, event):
+        self.state.update(self.left_rect.x - self.LEFT_ZERO, self.right_rect.x - self.RIGHT_ZERO)
+        self.continue_action = True
+        self.time = 0
 
     def draw(self):
-        self.start.pack()
         self.pack(fill=tkinter.BOTH, expand=1)
         self.canvas.create_line(self.ZERO.x - self.line_size, self.ZERO.y, self.ZERO.x + self.line_size, self.ZERO.y)
         self.canvas.create_line(self.ZERO.x, self.ZERO.y - self.line_size, self.ZERO.x, self.ZERO.y)
         self.canvas.pack(fill=tkinter.BOTH, expand=1)
 
-    def print_sticks(self, x1, x2, count, size):
-        step = (x2 - x1) / count
-        cur = x1
-        for i in range(count):
-            nxt = cur + step
-            self.canvas.create_line(nxt, self.ZERO.y - 5, nxt, self.ZERO.y - size + 5, tag='action')
-            self.canvas.create_line(cur, self.ZERO.y - 5, nxt, self.ZERO.y - size + 5, tag='action')
-            cur = nxt
+    def sticks(self, l, r, old):
+        if l > r:
+            l, r = r, l
+        h = [l + i * (r - l) // self.count for i in range(self.count + 1)]
+        for i in range(1, len(h)):
+            self.canvas.coords(old[i - 1][0], h[i], self.ZERO.y - 20, h[i], self.ZERO.y - 5)
+            self.canvas.coords(old[i - 1][1], h[i - 1], self.ZERO.y - 20, h[i], self.ZERO.y - 5)
+
+    def stick_update(self):
+        self.sticks(self.ZERO.x, self.left_rect.x, self.lsticks)
+        self.sticks(self.left_rect.x + self.left_rect.width, self.right_rect.x, self.rsticks)
 
     def action(self):
-        self.constants.read()
-        t = 0
         dt = 0.01
-        size = 30
-        stick_number = 10
-        sx1 = self.ZERO.x + 150
-        sx2 = self.ZERO.x + 300
-        delete = False
         while True:
-            x1, x2 = self.constants.get(t)
-            if delete:
-                self.canvas.delete('action')
-            l1 = sx1 + x1 - size
-            r1 = sx1 + x1 + size
+            if self.continue_action:
+                x1, x2 = self.state.get(self.time)
+                self.left_rect.move(self.LEFT_ZERO + x1, self.ZERO.y)
+                self.right_rect.move(self.RIGHT_ZERO + x2, self.ZERO.y)
+            self.stick_update()
+            self.time += dt
 
-            l2 = sx2 + x2 - size
-            r2 = sx2 + x2 + size
-
-            self.canvas.create_rectangle(l1, self.ZERO.y, r1, self.ZERO.y - size,
-                                         fill='yellow', tag="action")
-            self.canvas.create_rectangle(l2, self.ZERO.y, r2, self.ZERO.y - size,
-                                         fill='green', tag="action")
-            self.print_sticks(self.ZERO.x, l1, stick_number, size)
-            self.print_sticks(r1, l2, stick_number, size)
-            delete = True
-            t += dt
             self.canvas.update_idletasks()
             self.canvas.update()
 
 
 def main():
     root = tkinter.Tk()
-    Cartesian(300, 300)
+    c = Cartesian(300, 300)
     root.geometry("1500x900")
+    c.action()
     root.mainloop()
 
 
